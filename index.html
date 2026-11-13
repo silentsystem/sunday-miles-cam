@@ -271,7 +271,11 @@ async function openCamera(){
   try {
     camStream = await navigator.mediaDevices.getUserMedia({video: v, audio: !micTrack});
   } catch(e){
-    camStream = await navigator.mediaDevices.getUserMedia({video: v, audio: false});
+    try { camStream = await navigator.mediaDevices.getUserMedia({video: v, audio: false}); }
+    catch(e2){
+      if (e2 && (e2.name === 'OverconstrainedError' || e2.name === 'NotReadableError')) camStream = await navigator.mediaDevices.getUserMedia({video: {facingMode: facing}, audio: false});
+      else throw e2;
+    }
   }
   const a = camStream.getAudioTracks()[0]; if (a) micTrack = a;
   video.srcObject = new MediaStream(camStream.getVideoTracks());
@@ -413,20 +417,32 @@ async function boot(){
     $('startErr').textContent = 'Il filtro non si è caricato (' + (e && e.message || e) + '). Ricarica la pagina.'; $('startErr').hidden = false;
   }
 }
+const UA = navigator.userAgent;
+const inApp = /; wv\)|WhatsApp|Instagram|FBAN|FBAV|FB_IAB|Line\/|Telegram|TikTok|musical_ly|Snapchat/i.test(UA);
+const chromeIntent = 'intent://' + location.host + location.pathname + '#Intent;scheme=https;package=com.android.chrome;end';
+function showCamError(html){ $('startErr').innerHTML = html; $('startErr').hidden = false; }
+if (inApp){
+  showCamError('Sei nel browser interno di un\'app: qui la fotocamera non funziona.<br><a id="openChrome" href="' + chromeIntent + '" style="color:#ff6a13;font-weight:700">Apri in Chrome</a> oppure tocca ⋮ in alto e scegli "Apri in Chrome".');
+}
 $('startBtn').onclick = async () => {
   $('startBtn').disabled = true; $('startBtn').textContent = 'Avvio…';
   try {
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw new Error('nomedia');
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) throw Object.assign(new Error('nomedia'), {name:'NoMedia'});
     await openCamera();
     $('start').hidden = true; ['topbar','controls'].forEach(id => $(id).hidden = false);
     running = true; loop();
   } catch(e){
     console.error(e);
     $('startBtn').disabled = false; $('startBtn').textContent = 'Riprova';
-    $('startErr').textContent = location.protocol !== 'https:' && location.hostname !== 'localhost'
-      ? 'La fotocamera funziona solo da un indirizzo https://.'
-      : 'Serve il permesso per la fotocamera. Abilitalo nelle impostazioni del browser e riprova.';
-    $('startErr').hidden = false;
+    const n = e && e.name || '';
+    let msg;
+    if (location.protocol !== 'https:' && location.hostname !== 'localhost') msg = 'La fotocamera funziona solo da un indirizzo https://.';
+    else if (inApp || n === 'NoMedia') msg = 'Questo browser non dà accesso alla fotocamera. <a href="' + chromeIntent + '" style="color:#ff6a13;font-weight:700">Apri in Chrome</a>.';
+    else if (n === 'NotAllowedError' || n === 'SecurityError') msg = 'Chrome ha bloccato la fotocamera per questo sito. Tocca l\'icona a sinistra dell\'indirizzo (lucchetto o impostazioni) → Autorizzazioni → Fotocamera → Consenti, poi tocca Riprova. Controlla anche Impostazioni Android → App → Chrome → Autorizzazioni → Fotocamera.';
+    else if (n === 'NotReadableError' || n === 'AbortError' || n === 'TrackStartError') msg = 'La fotocamera è usata da un\'altra app o scheda. Chiudi le altre app che usano la fotocamera (e le altre schede del filtro), poi tocca Riprova.';
+    else if (n === 'NotFoundError' || n === 'OverconstrainedError') msg = 'Non trovo una fotocamera utilizzabile su questo dispositivo.';
+    else msg = 'Non riesco ad aprire la fotocamera.';
+    showCamError(msg + '<br><span style="opacity:.6;font-size:12px">Codice: ' + (n || 'sconosciuto') + '</span>');
   }
 };
 boot();
